@@ -142,7 +142,7 @@ int handleclient(struct client *p, struct client *top) {
         }
     }
     struct client * c;
-    printf("Current client is: %s\n", p->name);
+    // printf("Current client is: %s\n", p->name);
     // if there are two players already in a match with each other
     if (p->match_with == NULL) {
         for (c = p; c != NULL; c = c->next) {
@@ -301,6 +301,9 @@ int write_all(int fd, const char *buf, size_t count) {
 int startmatch(struct client * p1, struct client * p2, struct client * head) {
     // printf("currently reached here with: %s\n", p1->name);
     int num_written;
+    if (p1->hitpoints <= 0 || p2->hitpoints <= 0) {
+        return 0;
+    }
     if (p1->in_turn % 2 == 1) {
         char outbuf[512];
         int move = read_a_move(p1->fd);
@@ -338,9 +341,10 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 p1->match_with = NULL;
                 p1->last_opponent = p2;
                 p2->match_with = NULL;
-                p2->match_with = p1;
-                move_to_end(head, p1);
-                move_to_end(head, p2);
+                p2->last_opponent = p1;
+                // move_to_end(head, p1);
+                // move_to_end(head, p2);
+                return 0;
             }
         } else if (move == 2) {
             if (p1->powermoves == 0) { // player doesn't have powermoves
@@ -395,13 +399,15 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                     p1->match_with = NULL;
                     p1->last_opponent = p2;
                     p2->match_with = NULL;
-                    p2->match_with = p1;
-                    move_to_end(head, p1);
-                    move_to_end(head, p2);
+                    p2->last_opponent = p1;
+
+                    // move_to_end(head, p1);
+                    // move_to_end(head, p2);
+                    return 0;
                 }
             }
-        } else {
-            char * message = NULL;
+        } else if (move == 3) {
+            char message[256];
             num_written = read_message(message, p1->fd);
             if (num_written != -1) {
                 sprintf(outbuf, "Player (%s) says: \n%s\r\n", p1->name, message);
@@ -443,6 +449,15 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 }
             }
             return startmatch(p1, p2, head);
+        } else {
+            printf("Player has left.\r\n");
+            sprintf(outbuf, "Awaiting opponent...\n");
+            write(p2->fd, outbuf, strlen(outbuf));
+            p2->match_with = NULL;
+            p2->last_opponent = NULL;
+            sprintf(outbuf, "**%s left the match**\n . You win!\n", p1->name);
+            write(p2->fd, outbuf, strlen(outbuf));
+            return -1;
         }
         p1->in_turn = 0;
         p2->in_turn = 1;
@@ -480,7 +495,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
         }
 
     } else {
-        return -1;
+        return 0;
     }
     return 0;
 }
