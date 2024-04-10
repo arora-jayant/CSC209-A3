@@ -30,6 +30,8 @@ struct client {
     int in_turn;
     struct in_addr ipaddr;
     char name[128];
+    char buf[300];
+    int inbuf;
     struct client *next;
     struct client *last_opponent;
     struct client *match_with;
@@ -136,7 +138,11 @@ int handleclient(struct client *p, struct client *top) {
     // matching user
     if ((p->name)[0] == '\0') { // creating new user
         printf("creating a new user!");
-        if (login_user(p->fd, p, top) == 1) {
+        int reading;
+        while((reading = myread(p, top)) == 0) {
+            printf("still reading\n");
+        }
+        if (reading == -1) {
             printf("Login failed");
             return -1;
         }
@@ -144,8 +150,8 @@ int handleclient(struct client *p, struct client *top) {
     struct client * c;
     // printf("Current client is: %s\n", p->name);
     // if there are two players already in a match with each other
-    if (p->match_with == NULL) {
-        for (c = p; c != NULL; c = c->next) {
+    if (p->match_with == NULL && p->name != NULL) {
+        for (c = top; c != NULL; c = c->next) {
             // matching players
             if ((p->match_with == NULL && c->match_with == NULL) && (c->last_opponent != p && p->last_opponent != c) && p->fd != c->fd) {
 
@@ -171,7 +177,7 @@ int handleclient(struct client *p, struct client *top) {
                     broadcast(top, outbuf, strlen(outbuf));
                     return -1;
                 }
-                sprintf(outbuf, "Please enter your move (%s): \n(1) attack\n(2) powermove\n(3) item\r\n", p->name); // null terminator exists
+                sprintf(outbuf, "Please enter your move (%s): \n(a) attack\n(p) powermove\n(s) speak\r\n", p->name); // null terminator exists
                 num_written = write_all(p->fd, outbuf, strlen(outbuf)); // writing the message
                 if (num_written == -1) {
                     sprintf(outbuf, "(%s) has left\n", p->name);
@@ -184,7 +190,7 @@ int handleclient(struct client *p, struct client *top) {
     }
 
     // starting games between players
-    if (p->match_with != NULL) {
+    if (p->match_with != NULL && p->name != NULL) {
         printf("Player is in a match -> %s with %s\n", p->name, p->match_with->name);
         int valid = startmatch(p, p->match_with, top);
         if (valid == -1) {
@@ -224,40 +230,6 @@ int bindandlisten(void) {
         exit(1);
     }
     return listenfd;
-}
-
-int login_user(int clientfd, struct client *p, struct client * head) {
-    // login
-    char name[128]; 
-    char outbuf[512];
-
-    // reading name
-    int len = read(clientfd, name, sizeof(name) - 1); // reading the name the user sent
-    name[len] = '\0';
-
-    while (strstr(name, "\r\n") == NULL) {
-        len += read(clientfd, &name[len], MAX_BUF-len); // fetching any additional reads
-        name[len]='\0';
-    }
-    name[len-2] = '\0'; // replacing \r
-    printf("name is : %s\n", name);
-    if (len > 0) {
-        sprintf(outbuf, "\r\n**%s joined the area.**\r\n", name);
-        broadcast(head, outbuf, strlen(outbuf));
-        sprintf(outbuf, "Thanks for joining (%s), Awaiting opponent...\r\n", name);
-        write_all(clientfd, outbuf, strlen(outbuf));
-        strcpy(head->name, name);
-        return 0;
-    } else if (len <= 0) {
-        // socket is closed
-        printf("Disconnect from %s\n", inet_ntoa(p->ipaddr));
-        sprintf(outbuf, "(%s) has left\n", p->name);
-        broadcast(head, outbuf, strlen(outbuf));
-        return -1;
-    } else {
-        // printf("Should not reach here\n");
-        return -1; // shouldnt reach here
-    }
 }
 
 struct client * findclient(int fd, struct client * head) {
@@ -306,9 +278,20 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
     }
     if (p1->in_turn % 2 == 1) {
         char outbuf[512];
-        int move = read_a_move(p1->fd);
+        int move;
+        
+        while (move >= 0) {
+            move = read_a_move(p1->fd);
+            printf("Move is: %d\n", move);
+            if (move == 'a' || move == 'p' || move == 's') {
+                break;
+            }
+            char * msg = "Please enter a valid move.\r\n";
+            sprintf(outbuf, "Please enter a valid move.\r\n");
+            num_written = write_all(p1->fd, msg, strlen(msg));
+        }
 
-        if (move == 1) {
+        if (move == 'a') {
             int damage = (rand() % 5) + 2;
             p2->hitpoints = p2->hitpoints - damage;
             sprintf(outbuf, "Player (%s) attacks player (%s) for %d damage\r\n", p1->name, p2->name, damage);
@@ -346,7 +329,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 // move_to_end(head, p2);
                 return 0;
             }
-        } else if (move == 2) {
+        } else if (move == 'p') {
             if (p1->powermoves == 0) { // player doesn't have powermoves
                 return startmatch(p1, p2, head); // calling function again, invalid input
             }
@@ -406,7 +389,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                     return 0;
                 }
             }
-        } else if (move == 3) {
+        } else if (move == 's') {
             char message[256];
             num_written = read_message(message, p1->fd);
             if (num_written != -1) {
@@ -432,7 +415,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 return -1;
             }
             if (p2->powermoves > 0) {
-                sprintf(outbuf, "Please enter your move (%s): \n(1) attack\n(2) powermove\n(3) speak\r\n", p1->name); // null terminator exists
+                sprintf(outbuf, "Please enter your move (%s): \n(a) attack\n(p) powermove\n(s) speak\r\n", p1->name); // null terminator exists
                 int num_written = write_all(p1->fd, outbuf, strlen(outbuf)); // writing the message
                 if (num_written == -1) {
                     sprintf(outbuf, "(%s) has left\n", p1->name);
@@ -440,7 +423,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                     return -1;
                 }
             } else {
-                sprintf(outbuf, "Please enter your move (%s): \n(1) attack\n(3) speak\r\n", p1->name); // null terminator exists
+                sprintf(outbuf, "Please enter your move (%s): \n(a) attack\n(s) speak\r\n", p1->name); // null terminator exists
                 int num_written = write_all(p1->fd, outbuf, strlen(outbuf)); // writing the message
                 if (num_written == -1) {
                     sprintf(outbuf, "(%s) has left\n", p1->name);
@@ -470,7 +453,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
             return -1;
         }
         if (p2->powermoves > 0) {
-            sprintf(outbuf, "Please enter your move (%s): \n(1) attack\n(2) powermove\n(3) speak\r\n", p2->name); // null terminator exists
+            sprintf(outbuf, "Please enter your move (%s): \n(a) attack\n(p) powermove\n(s) speak\r\n", p2->name); // null terminator exists
             int num_written = write_all(p2->fd, outbuf, strlen(outbuf)); // writing the message
             if (num_written == -1) {
                 sprintf(outbuf, "(%s) has left\n", p2->name);
@@ -478,7 +461,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 return -1;
             }
         } else {
-            sprintf(outbuf, "Please enter your move (%s): \n(1) attack\n(3) speak\r\n", p2->name); // null terminator exists
+            sprintf(outbuf, "Please enter your move (%s): \n(a) attack\n(s) speak\r\n", p2->name); // null terminator exists
             int num_written = write_all(p2->fd, outbuf, strlen(outbuf)); // writing the message
             if (num_written == -1) {
                 sprintf(outbuf, "(%s) has left\n", p2->name);
@@ -519,30 +502,24 @@ int read_message(char * message, int fd) {
 }
 
 int read_a_move(int fd) {
-    int move = -1;
+    char ch;
+    int bytes_read;
 
-    while (move < 1 || move > 3) {
-        char line_buf[MAX_BUF];
-        int num_chars = read(fd, line_buf, MAX_BUF);
-        if (num_chars <= 0) {
-            return -1;
-        }
-        line_buf[num_chars] = '\0';
+    // Read single character from the client's file descriptor
+    bytes_read = read(fd, &ch, 1);
 
-        while (strstr(line_buf, "\r\n") == NULL) {
-            num_chars += read(fd, &line_buf[num_chars], MAX_BUF-num_chars); // fetching any additional reads
-            line_buf[num_chars]='\0';
-        }
-        line_buf[num_chars-2] = '\0'; // replacing \r
-
-        move = strtol(line_buf, NULL, 10);
-
-        if (move < 1 || move > 3) {
-            char *msg = "Your move is not allowed. Please enter a move between 1-3.\r\n";
-            write(fd, msg, strlen(msg));
-        }
+    if (bytes_read == -1) {
+        // No data available or error
+        printf("No data available.\n");
+        return -1;
+    } else if (bytes_read == 0) {
+        // End of file
+        printf("EOF!\n");
+        return -1;
     }
-    return move;
+    // Process the character
+    printf("Received character: %c\n", ch);
+    return ch;
 }
 
 static struct client *addclient(struct client *top, int fd, struct in_addr addr) {
@@ -598,4 +575,61 @@ static void broadcast(struct client *top, char *s, int size) {
         write(p->fd, s, size);
     }
     /* should probably check write() return value and perhaps remove client */
+}
+
+int myread(struct client *p, struct client * head) {
+    char *startbuf = p->buf + p->inbuf;    // Pointer to the start of available space in the buffer
+    int room = sizeof(p->buf) - p->inbuf;   // Available space in the buffer
+    int crlf;                               // Length of line terminator (\r\n or \n\r)
+    char *tok, *cr, *lf;                    // Pointers for tokenizing and finding line terminators
+
+    if (room <= 1) {
+        // Clean up this client: buffer full
+        // In this case, you might want to handle the buffer being full. For example, you could close the connection or drop the data.
+        printf("Buffer is full\n");
+        return -1;
+    }
+
+    int len = read(p->fd, startbuf, room - 1);   // Read data from the client's file descriptor
+
+    if (len <= 0) {
+        // Clean up this client: eof or error
+        // In this case, you might want to handle the end of file or error condition. For example, you could close the connection.
+        printf("EOF!\n");
+        return -1;
+    }
+
+    p->inbuf += len;                        // Update the index to the end of data in the buffer
+    p->buf[p->inbuf] = '\0';                // Null-terminate the buffer to treat it as a string
+
+    lf = strchr(p->buf, '\n');              // Find the first occurrence of '\n'
+    cr = strchr(p->buf, '\r');              // Find the first occurrence of '\r'
+
+    if (!lf && !cr)
+        return 0;                           // No complete line yet, continue reading
+
+    tok = strtok(p->buf, "\r\n");           // Tokenize the string by '\r' or '\n'
+
+    if (tok) {
+        printf("Got one!\n");
+        char outbuf[512];
+        strcpy(p->name, tok);               // If there's a token, copy it to the client's name
+        sprintf(outbuf, "**%s joined the area.**\r\n", p->name);
+        broadcast(head, outbuf, strlen(outbuf));
+        sprintf(outbuf, "Thanks for joining (%s), Awaiting opponent...\r\n", p->name);
+        write_all(p->fd, outbuf, strlen(outbuf));
+        return 1;
+    }
+    if (!lf)
+        crlf = cr - p->buf;                 // Calculate the length of line terminator (\r\n or \n\r)
+    else if (!cr)
+        crlf = lf - p->buf;
+    else
+        crlf = (lf > cr) ? lf - p->buf : cr - p->buf;
+
+    crlf++;                                 // Include the length of line terminator in the count
+
+    p->inbuf -= crlf;                       // Adjust the index to the end of data in the buffer
+    memmove(p->buf, p->buf + crlf, p->inbuf);   // Move the remaining data to the beginning of the buffer
+    return 0;
 }
