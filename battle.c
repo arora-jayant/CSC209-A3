@@ -38,8 +38,9 @@ struct client {
     int hitpoints;
     int powermoves;
     int waiting;
+    int is_powered;
 };
-
+//
 int login_user(int client_fd, struct client *p, struct client * head);
 static struct client *addclient(struct client *top, int fd, struct in_addr addr);
 static struct client *removeclient(struct client *top, int fd);
@@ -47,8 +48,8 @@ static void broadcast(struct client *top, char *s, int size);
 int handleclient(struct client *p, struct client *top);
 struct client * findclient(int fd, struct client * head);
 int startmatch(struct client * p1, struct client * p2, struct client * head);
-static void move_to_end(struct client *top, struct client *client);
 int read_message(char * message, int fd);
+int myread(struct client *p, struct client * head);
 
 int read_a_move(int fd);
 int write_all(int fd, const char *buf, size_t count);
@@ -65,7 +66,7 @@ int main(void) {
     struct sockaddr_in q;
     struct timeval tv;
     fd_set allset;
-    fd_set rset, eset;
+    fd_set rset;
 
     int i;
 
@@ -81,13 +82,12 @@ int main(void) {
     while (1) {
         // make a copy of the set before we pass it into select
         rset = allset;
-        eset = allset;
         /* timeout in seconds (You may not need to use a timeout for
         * your assignment)*/
         tv.tv_sec = SECONDS;
         tv.tv_usec = 0;  /* and microseconds */
 
-        nready = select(maxfd + 1, &rset, NULL, &eset, &tv);
+        nready = select(maxfd + 1, &rset, NULL, NULL, &tv);
         if (nready == 0) {
             // printf("No response from clients in %d seconds\n", SECONDS);
             continue;
@@ -130,25 +130,8 @@ int main(void) {
                     }    
                 }
             }
-            if (FD_ISSET(i, &eset)) {
-                for (p = head; p != NULL; p = p->next) {
-                    if (p->fd == i) {
-                        printf("removing player: %d\n", i);
-                        int tmp_fd = p->fd;
-                        head = removeclient(head, p->fd);
-                        FD_CLR(tmp_fd, &allset);
-                        close(tmp_fd);
-                        break;
-                    }    
-                }
-            }
         }
     }
-    if (p->waiting) {
-        return 0;
-    }
-    printf("not waiting");
-    return 1;
 }
 
 int handleclient(struct client *p, struct client *top) {
@@ -185,7 +168,6 @@ int handleclient(struct client *p, struct client *top) {
                 c->hitpoints = (rand() % 11) + 20;
                 c->powermoves = (rand() % 3) + 1;
 
-
                 char outbuf[512];
                 sprintf(outbuf, "Player (%s) will begin a match with player (%s)\r\n", p->name, c->name);
                 broadcast(top, outbuf, strlen(outbuf));
@@ -221,7 +203,11 @@ int handleclient(struct client *p, struct client *top) {
         }
     }
 
-    return 0;
+    if (p->waiting) {
+        return 0;
+    }
+    printf("not waiting");
+    return 1;
 }
 
  /* bind and listen, abort on error
@@ -266,19 +252,6 @@ struct client * findclient(int fd, struct client * head) {
     return NULL;
 }
 
-static void move_to_end(struct client *top, struct client *client) {
-    struct client *rep;
-    for(rep = top; rep != NULL; rep = rep->next){
-        if(rep->next == client){
-            rep->next = client->next;
-            client->next = NULL;
-        }
-        if(rep->next == NULL){
-            rep->next = client;
-        }
-    }
-}
-
 int write_all(int fd, const char *buf, size_t count) {
     ssize_t num_written_total = 0;
     ssize_t num_written;
@@ -295,7 +268,6 @@ int write_all(int fd, const char *buf, size_t count) {
 }
 
 int startmatch(struct client * p1, struct client * p2, struct client * head) {
-    // printf("currently reached here with: %s\n", p1->name);
     int num_written;
     if (p1->hitpoints <= 0 || p2->hitpoints <= 0) {
         return 0;
@@ -344,8 +316,6 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 p1->last_opponent = p2;
                 p2->match_with = NULL;
                 p2->last_opponent = p1;
-                // move_to_end(head, p1);
-                // move_to_end(head, p2);
                 p1->waiting = 1;
                 p2->waiting = 1;
                 return 0;
@@ -407,8 +377,6 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
 
                     p1->waiting = 1;
                     p2->waiting = 1;
-                    // move_to_end(head, p1);
-                    // move_to_end(head, p2);
                     return 0;
                 }
             }
@@ -462,18 +430,9 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
             p2->waiting = 1;
             sprintf(outbuf, "**%s left the match**\nYou win!\r\n", p1->name);
             num_written = write_all(p2->fd, outbuf, strlen(outbuf));
-            if (num_written == -1) {
-                sprintf(outbuf, "(%s) has left\r\n", p1->name);
-                broadcast(head, outbuf, strlen(outbuf));
-                return -1;
-            }
+
             sprintf(outbuf, "Awaiting opponent...\r\n");
             num_written = write_all(p2->fd, outbuf, strlen(outbuf));
-            if (num_written == -1) {
-                sprintf(outbuf, "(%s) has left\r\n", p1->name);
-                broadcast(head, outbuf, strlen(outbuf));
-                return -1;
-            }
             return -1;
         }
         p1->in_turn = 0;
@@ -484,7 +443,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
         if (num_written == -1) {
             sprintf(outbuf, "(%s) has left\r\n", p2->name);
             broadcast(head, outbuf, strlen(outbuf));
-            return -1;
+            return 0;
         }
         if (p2->powermoves > 0) {
             sprintf(outbuf, "Please enter your move (%s): \r\n(a) attack\r\n(p) powermove\r\n(s) speak\r\n", p2->name); // null terminator exists
@@ -492,7 +451,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
             if (num_written == -1) {
                 sprintf(outbuf, "(%s) has left\r\n", p2->name);
                 broadcast(head, outbuf, strlen(outbuf));
-                return -1;
+                return 0;
             }
         } else {
             sprintf(outbuf, "Please enter your move (%s): \r\n(a) attack\r\n(s) speak\r\n", p2->name); // null terminator exists
@@ -514,22 +473,30 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
     return 0;
 }
 
-int read_message(char * message, int fd) {
+int read_message(char *message, int fd) {
     write_all(fd, "Speak now: ", 11);
-    char line_buf[MAX_BUF];
-    int num_chars = read(fd, line_buf, MAX_BUF);
-    if (num_chars <= 0) {
-        return -1;
-    }
-    line_buf[num_chars] = '\0';
 
-    while (strstr(line_buf, "\r\n") == NULL) {
-        num_chars += read(fd, &line_buf[num_chars], MAX_BUF-num_chars); // fetching any additional reads
-        line_buf[num_chars]='\0';
+    char buffer[MAX_BUF];
+    int index = 0;
+    char c;
+
+    while (read(fd, &c, 1) == 1) {
+        if (c == '\n') {
+            buffer[index] = '\0';
+            strncpy(message, buffer, MAX_BUF);
+            return 0;
+        } else {
+            buffer[index++] = c;
+            if (index >= MAX_BUF - 1) {
+                buffer[index] = '\0';
+                strncpy(message, buffer, MAX_BUF);
+                return -1;
+            }
+        }
     }
-    line_buf[num_chars-2] = '\0'; // replacing \r
-    strncpy(message, line_buf, num_chars);
-    return 0;
+
+    // If read() returns 0 or negative value, it indicates end-of-file or error
+    return -1;
 }
 
 int read_a_move(int fd) {
@@ -604,7 +571,9 @@ static struct client *removeclient(struct client *top, int fd) {
 static void broadcast(struct client *top, char *s, int size) {
     struct client *p;
     for (p = top; p; p = p->next) {
-        write(p->fd, s, size);
+        if (write(p->fd, s, size) == -1) {
+            removeclient(top, p->fd);
+        }
     }
     /* should probably check write() return value and perhaps remove client */
 }
