@@ -438,6 +438,8 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 
                 sprintf(outbuf, "Player (%s) misses the killmove!\r\n", p1->name);
                 num_written = write_all(p1->fd, outbuf, strlen(outbuf)); // writing the message
+                int own_damage = p1->hitpoints / 2;
+                p1->hitpoints = p1->hitpoints - own_damage; 
                 if (num_written == -1) {
                     sprintf(outbuf, "(%s) has left\r\n", p1->name);
                     broadcast(head, outbuf, strlen(outbuf));
