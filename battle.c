@@ -19,7 +19,7 @@
 #include <time.h>
 
 #ifndef PORT
-    #define PORT 57521
+    #define PORT 50538
 #endif
 
 #define MAX_BUF 128
