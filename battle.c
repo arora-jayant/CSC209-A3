@@ -498,6 +498,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                 num_written = write_all(p2->fd, outbuf, strlen(outbuf));
                 return -1;
             }
+            }
         p1->in_turn = 0;
         p2->in_turn = 1;
 
@@ -536,6 +537,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
     return 0;
 } 
 }
+
 
 int read_message(char *message, int fd) {
     write_all(fd, "Speak now: ", 11);
