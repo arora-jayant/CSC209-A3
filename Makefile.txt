@@ -1,4 +1,4 @@
-PORT=50538
+PORT=50539
 CFLAGS= -DPORT=\$(PORT) -g -Wall
 
 battle: battle.c
