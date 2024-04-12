@@ -486,8 +486,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
                     p1->waiting = 1;
                     p2->waiting = 1;
                     return 0;
-                }
-            } else {
+                } else {
                 printf("Player has left.\r\n");
                 p2->match_with = NULL;
                 p2->last_opponent = NULL;
@@ -535,6 +534,7 @@ int startmatch(struct client * p1, struct client * p2, struct client * head) {
         }
     }
     return 0;
+} 
 }
 
 int read_message(char *message, int fd) {
